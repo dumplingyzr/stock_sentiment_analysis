@@ -26,9 +26,17 @@ scheduler.start()
 
 app = Flask(__name__)
 app.config.from_envvar('CONFIG_FILE')
-watchlist = set(["AAPL", "TSLA"])
+watchlist = set(["trump"])
 
 kafka_broker = app.config["KAFKA_BROKER"]
+
+consumer_key = app.config["CONSUMER_KEY"]
+consumer_secret = app.config["CONSUMER_SECRET"]
+access_token = app.config["ACCESS_TOKEN"]
+access_secret = app.config["ACCESS_SECRET"]
+auth = OAuthHandler(consumer_key, consumer_secret)
+auth.set_access_token(access_token, access_secret)
+tw_api = tweepy.API(auth)
 
 producer = KafkaProducer(bootstrap_servers = kafka_broker)
 consumer = KafkaConsumer(
@@ -48,7 +56,9 @@ class Listener(tweepy.StreamListener):
 		if status.retweeted or status.text[:4] == "RT @":
 			return True   
 
-		print(status.text)
+		logger.info("Sending tweet to Kafka topic %s_tweet:\n%s",
+			self.symbol,
+			status.text)
 
 		try:
 			self.producer.send(
@@ -82,25 +92,23 @@ def fetch_price(symbol):
 	finally:
 		logger.info("fetched %s stock price", symbol)
 
-def tweepy_auth():
-	# Set up twitter API authentication
-	consumer_key = app.config["CONSUMER_KEY"]
-	consumer_secret = app.config["CONSUMER_SECRET"]
-	access_token = app.config["ACCESS_TOKEN"]
-	access_secret = app.config["ACCESS_SECRET"]
-	auth = OAuthHandler(consumer_key, consumer_secret)
-	auth.set_access_token(access_token, access_secret)
-	return tweepy.API(auth)
-
 @app.route("/<symbol>", methods=["POST"])
 def on_watchlist_add(symbol):
-	watchlist.add(symbol)
-	scheduler.add_job(fetch_price, "interval", [producer, symbol], seconds = 10, id = symbol)
+	s = symbol.lower()
+	#watchlist.add(s)
+	#scheduler.add_job(fetch_price, "interval", [s], seconds = 10, id = s)
+	try:
+		listener = Listener(producer, s, tw_api)
+		stream = tweepy.Stream(auth = tw_api.auth, listener = listener)
+		stream.filter(track = [s], async = True, languages = ["en"])
+	except TweepError as te:
+		logger.debug("TweepyExeption: Failed to get tweet for stocks caused by: %s" % te.message)
 
 @app.route("/<symbol>", methods=["DELETE"])
 def on_watchlist_remove(symbol):
-	watchlist.remove(symbol)
-	scheduler.remove_job(symbol)
+	s = symbol.lower()
+	watchlist.remove(s)
+	scheduler.remove_job(s)
 
 def shutdown_hook():
 	try:
@@ -122,18 +130,11 @@ def shutdown_hook():
 		logger.error("Failed to shutdown scheduler:\n%s", str(e))
 
 def main():
-	tw_api = tweepy_auth()
+	
 	atexit.register(shutdown_hook)
 
 	for symbol in watchlist:
-		#watchlist.add(symbol)
-		#scheduler.add_job(fetch_price, "interval", [symbol], seconds = 5, id = symbol)
-		try:
-			listener = Listener(producer, symbol, tw_api)
-			stream = tweepy.Stream(auth = tw_api.auth, listener = listener)
-			stream.filter(track = ["$"+symbol], async = True, languages = ["en"])
-		except TweepError as te:
-			logger.debug("TweepyExeption: Failed to get tweet for stocks caused by: %s" % te.message)
+		on_watchlist_add(symbol)
 
 	app.run(port = app.config["FLASK_APP_PORT"])
 
