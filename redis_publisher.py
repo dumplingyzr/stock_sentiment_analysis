@@ -26,7 +26,7 @@ def shutdown_hook():
 	tweet_consumer.close()
 
 class RedisPublisher(Thread):
-	daemon = True
+	#daemon = True
 	def __init__(self, redis_client, consumer):
 		Thread.__init__(self)
 		self.redis_client = redis_client
@@ -34,6 +34,7 @@ class RedisPublisher(Thread):
 
 	def run(self):
 		for msg in self.consumer:
+			logger.info("Publishing to web server: %s", msg.value)
 			self.redis_client.publish("tweet", msg.value)
 
 @app.route("/<symbol>", methods=["GET"])
@@ -50,7 +51,7 @@ def on_active_symbol(symbol):
 	redis_thread.start()
 
 def main():
-	on_active_symbol("trump")
+	on_active_symbol("aapl")
 	atexit.register(shutdown_hook)
 
 if __name__ == "__main__":

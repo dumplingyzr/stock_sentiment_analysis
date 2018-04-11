@@ -26,7 +26,7 @@ scheduler.start()
 
 app = Flask(__name__)
 app.config.from_envvar('CONFIG_FILE')
-watchlist = set(["trump"])
+watchlist = set(["aapl"])
 
 kafka_broker = app.config["KAFKA_BROKER"]
 
@@ -64,7 +64,7 @@ class Listener(tweepy.StreamListener):
 			self.producer.send(
 				topic=self.symbol + "_tweet", 
 				value=status.text.encode('utf-8'), 
-				timestamp_ms=time.time())
+				timestamp_ms=int(time.time()))
 		except KafkaTimeoutError as te:
 			logger.warn("Failed to send tweet caused by: %s", te.message)
 			return False
@@ -100,7 +100,7 @@ def on_watchlist_add(symbol):
 	try:
 		listener = Listener(producer, s, tw_api)
 		stream = tweepy.Stream(auth = tw_api.auth, listener = listener)
-		stream.filter(track = [s], async = True, languages = ["en"])
+		stream.filter(track = ["$"+s], async = True, languages = ["en"])
 	except TweepError as te:
 		logger.debug("TweepyExeption: Failed to get tweet for stocks caused by: %s" % te.message)
 
